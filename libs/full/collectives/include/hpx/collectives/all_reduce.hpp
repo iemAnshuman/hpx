@@ -456,6 +456,17 @@ namespace hpx::collectives {
             this_site = agas::get_locality_id();
         }
 
+        // Fall back to flat all_reduce for small site counts where
+        // hierarchical overhead exceeds the benefit
+        auto [num_sites, site_info, root_info] =
+            communicators.get_info_ex();
+        if (static_cast<std::size_t>(num_sites) < 16)
+        {
+            return all_reduce(communicators.get(0),
+                HPX_FORWARD(T, local_result), HPX_FORWARD(F, op),
+                this_site, generation);
+        }
+
         generation_arg const reduce_gen(2 * generation - 1);
         generation_arg const broadcast_gen(2 * generation);
 
