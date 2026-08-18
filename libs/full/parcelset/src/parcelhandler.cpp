@@ -120,6 +120,7 @@ namespace hpx::parcelset {
                 return true;
             }
 #endif
+
             // all unhandled exceptions are rethrown here
             std::exception_ptr const exception = hpx::detail::get_exception(
                 hpx::exception(ec), "default_parcel_write_handler", __FILE__,

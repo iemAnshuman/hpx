@@ -118,11 +118,11 @@ namespace {
 
         // Depart mid-epoch: no finalize() (so no event::completed is ever
         // published and neither symbol name is ever unregistered - the
-        // sentinel's last published event stays stale), and no std::abort() (so
+        // sentinel's last published event stays stale), and no std::exit() (so
         // AGAS/the parcelport connection are torn down consistently rather than
         // corrupted). First join the background loops so hpx::disconnect()
         // below does not hang waiting on them or race their teardown of
-        // sentinel/registry state.
+        // registry state.
         hpx::supervision::testing::stop_background_loops();
 
         return hpx::disconnect();
