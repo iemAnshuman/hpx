@@ -121,12 +121,7 @@ namespace hpx::parcelset {
             }
 #endif
 
-            // all unhandled exceptions are rethrown here
-            std::exception_ptr const exception = hpx::detail::get_exception(
-                hpx::exception(ec), "default_parcel_write_handler", __FILE__,
-                __LINE__, parcelset::dump_parcel(p));
-
-            std::rethrow_exception(exception);
+            return false;
         }
     }    // namespace
 
@@ -147,7 +142,14 @@ namespace hpx::parcelset {
 
     void default_write_handler(std::error_code const& ec, parcel const& p)
     {
-        default_parcel_write_handler(ec, p);
+        if (ec && !default_parcel_write_handler(ec, p))
+        {
+            std::exception_ptr const exception = hpx::detail::get_exception(
+                hpx::exception(ec), "default_write_handler", __FILE__,
+                __LINE__, parcelset::dump_parcel(p));
+
+            std::rethrow_exception(exception);
+        }
     }
 
     parcelhandler::parcelhandler(util::runtime_configuration const& cfg)
