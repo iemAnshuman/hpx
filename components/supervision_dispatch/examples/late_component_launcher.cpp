@@ -334,8 +334,8 @@ namespace {
                         return false;
                     },
                     [&](hpx::exception const& e) {
-                        if (auto const err = hpx::get_error(e);
-                            err != hpx::error::target_fenced &&
+                        auto const err = hpx::get_error(e);
+                        if (err != hpx::error::target_fenced &&
                             err != hpx::error::locality_was_disconnected)
                         {
                             throw e;
@@ -358,23 +358,30 @@ namespace {
 
                         worker_slots[current.worker_slot_index] = std::nullopt;
 
-                        // Detect -> purge -> relaunch: a fenced worker's
-                        // locality is still registered with AGAS/the parcelport
-                        // connection caches until something explicitly removes
-                        // it - fencing alone does not do this.
-                        // force_disconnect() purges it so the respawn below
-                        // never has to contend with connection-cache state left
-                        // over from this crashed/departed worker.
-                        std::cerr
-                            << "late_component_launcher: detected fenced "
-                               "worker at slot "
-                            << current.worker_slot_index
-                            << "; purging locality via force_disconnect\n";
-                        hpx::force_disconnect(fenced_locality);
-                        std::cerr
-                            << "late_component_launcher: purge complete for "
-                               "slot "
-                            << current.worker_slot_index << "\n";
+                        // A clean hpx::disconnect() has already purged the
+                        // locality by the time dispatch reports
+                        // locality_was_disconnected. A fenced worker still
+                        // needs force_disconnect() before it can be replaced.
+                        if (err == hpx::error::locality_was_disconnected)
+                        {
+                            std::cerr
+                                << "late_component_launcher: worker at slot "
+                                << current.worker_slot_index
+                                << " already disconnected\n";
+                        }
+                        else
+                        {
+                            std::cerr
+                                << "late_component_launcher: detected fenced "
+                                   "worker at slot "
+                                << current.worker_slot_index
+                                << "; purging locality via force_disconnect\n";
+                            hpx::force_disconnect(fenced_locality);
+                            std::cerr
+                                << "late_component_launcher: purge complete "
+                                   "for slot "
+                                << current.worker_slot_index << "\n";
+                        }
 
                         ++current.retries;
                         if (current.retries > max_task_retries)
