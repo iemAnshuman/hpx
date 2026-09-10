@@ -18,6 +18,8 @@
 #include <hpx/hpx_init.hpp>
 #include <hpx/modules/actions.hpp>
 #include <hpx/modules/collectives.hpp>
+#include <hpx/modules/execution_base.hpp>
+#include <hpx/modules/runtime_local.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -38,6 +40,13 @@ std::uint32_t sleep_locality(int const ms)
     return hpx::get_locality_id();
 }
 HPX_PLAIN_ACTION(sleep_locality, sleep_locality_action)
+
+void wait_for_startup()
+{
+    hpx::util::yield_while([]() { return !hpx::is_running(); },
+        "force_disconnect: wait for worker startup");
+}
+HPX_PLAIN_ACTION(wait_for_startup, wait_for_startup_action)
 
 int hpx_main()
 {

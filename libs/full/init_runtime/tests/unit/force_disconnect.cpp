@@ -35,6 +35,7 @@
 #include <hpx/modules/async_distributed.hpp>
 #include <hpx/modules/components_base.hpp>
 #include <hpx/modules/errors.hpp>
+#include <hpx/modules/execution_base.hpp>
 #include <hpx/modules/filesystem.hpp>
 #include <hpx/modules/functional.hpp>
 #include <hpx/modules/naming_base.hpp>
@@ -166,6 +167,13 @@ std::uint32_t sleep_locality(int const ms)
 }
 HPX_PLAIN_ACTION(sleep_locality, sleep_locality_action)
 
+void wait_for_startup()
+{
+    hpx::util::yield_while([]() { return !hpx::is_running(); },
+        "force_disconnect: wait for worker startup");
+}
+HPX_PLAIN_ACTION(wait_for_startup, wait_for_startup_action)
+
 // Launches a new connecting-locality worker process and identifies the
 // hpx::id_type it registered as, by diffing the set of known localities before
 // and after the launch. Returns both the child handle (so the caller can, e.g.,
@@ -194,6 +202,10 @@ std::pair<process::child, hpx::id_type> launch_worker(
         }
     }
     HPX_TEST(new_locality);
+
+    // Registration can finish while pre_main is still waiting for startup
+    // RPCs. Disconnecting then can strand pre_main and block worker shutdown.
+    hpx::async<wait_for_startup_action>(new_locality).get();
 
     return std::make_pair(HPX_MOVE(worker), new_locality);
 }
@@ -679,15 +691,8 @@ int hpx_main(hpx::program_options::variables_map& vm)
 
     std::cout << "Launching " << exe << "\n";
 
-    process::child w1 = process::launch_connecting_locality(
-        fs::to_string(exe), {"--hpx:threads=1"}, {}, 1);
-    w1.wait();
-    HPX_TEST(w1);
-
-    process::child w2 = process::launch_connecting_locality(
-        fs::to_string(exe), {"--hpx:threads=1"}, {}, 2);
-    w2.wait();
-    HPX_TEST(w2);
+    auto [w1, id1] = launch_worker(exe, 1);
+    auto [w2, id2] = launch_worker(exe, 2);
 
     HPX_TEST_EQ(hpx::find_all_localities().size(), static_cast<std::size_t>(3));
 
