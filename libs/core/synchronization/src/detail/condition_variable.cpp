@@ -22,16 +22,18 @@
 #include <atomic>
 #include <cstddef>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <utility>
 
 namespace hpx::lcos::local::detail {
 
+    using notification = hpx::execution_base::agent_wait_state::notification;
+
     ///////////////////////////////////////////////////////////////////////////
     struct condition_variable::queue_entry
     {
-        constexpr queue_entry(
-            hpx::execution_base::agent_ref const ctx, void* q) noexcept
+        queue_entry(hpx::execution_base::agent_ref const ctx, void* q) noexcept
           : ctx_(ctx)
           , q_(q)
         {
@@ -39,7 +41,7 @@ namespace hpx::lcos::local::detail {
 
         hpx::execution_base::agent_ref ctx_;
         void* q_;
-        std::atomic<bool> was_reset_ = false;
+        std::shared_ptr<hpx::execution_base::agent_wait_state> timed_wait_;
 
         queue_entry* next = nullptr;
         queue_entry* prev = nullptr;
@@ -121,16 +123,23 @@ namespace hpx::lcos::local::detail {
 
         HPX_ASSERT_OWNS_LOCK(lock);
 
-        if (!queue_.empty())
+        while (!queue_.empty())
         {
             auto* front = queue_.front();
             auto const ctx = front->ctx_;
+            auto const notify = front->timed_wait_ ?
+                front->timed_wait_->notify(
+                    threads::thread_restart_state::signaled) :
+                notification::resume;
 
             // remove item from queue before error handling
             front->ctx_.reset();
-            front->was_reset_.store(true, std::memory_order_relaxed);
 
             queue_.pop_front();
+
+            // A timed-out entry must not consume another waiter's notification.
+            if (notify == notification::stale)
+                continue;
 
             if (HPX_UNLIKELY(!ctx))
             {
@@ -146,7 +155,8 @@ namespace hpx::lcos::local::detail {
             if (unlock)
                 lock.unlock();
 
-            ctx.resume(priority);
+            if (notify == notification::resume)
+                ctx.resume(priority);
 
             return not_empty;
         }
@@ -182,7 +192,7 @@ namespace hpx::lcos::local::detail {
         if (!queue.empty())
         {
             // update reference to queue for all queue entries
-            for (queue_entry* qe = queue_.front(); qe != nullptr; qe = qe->next)
+            for (queue_entry* qe = queue.front(); qe != nullptr; qe = qe->next)
             {
                 qe->q_ = &queue;    //-V506
             }
@@ -191,12 +201,18 @@ namespace hpx::lcos::local::detail {
             {
                 auto* front = queue.front();
                 auto ctx = front->ctx_;
+                auto const notify = front->timed_wait_ ?
+                    front->timed_wait_->notify(
+                        threads::thread_restart_state::signaled) :
+                    notification::resume;
 
                 // remove item from queue before error handling
                 front->ctx_.reset();
-                front->was_reset_.store(true, std::memory_order_relaxed);
 
                 queue.pop_front();
+
+                if (notify != notification::resume)
+                    continue;
 
                 if (HPX_UNLIKELY(!ctx))
                 {
@@ -276,20 +292,16 @@ namespace hpx::lcos::local::detail {
         // enqueue the request and block this thread
         auto const this_ctx = hpx::execution_base::this_thread::agent();
         queue_entry f(this_ctx, &queue_);
+        f.timed_wait_ =
+            std::make_shared<hpx::execution_base::agent_wait_state>();
         queue_.push_back(f);
 
         reset_queue_entry r(f);
 
         // suspend this thread
         unlock_guard<std::unique_lock<mutex_type>> ul(lock);
-        return this_ctx.sleep_until(
-            abs_time.value(),
-            [&, pred = HPX_MOVE(wait_cond)]() {
-                if (f.was_reset_.load(std::memory_order_relaxed))
-                    return true;
-                return pred();
-            },
-            description);
+        return this_ctx.ref().suspend_until(
+            abs_time, f.timed_wait_, HPX_MOVE(wait_cond), description);
     }
 
     template <typename Mutex>
@@ -303,7 +315,7 @@ namespace hpx::lcos::local::detail {
             queue.swap(queue_);
 
             // update reference to queue for all queue entries
-            for (queue_entry* qe = queue_.front(); qe != nullptr; qe = qe->next)
+            for (queue_entry* qe = queue.front(); qe != nullptr; qe = qe->next)
             {
                 qe->q_ = &queue;    //-V506
             }
@@ -312,12 +324,18 @@ namespace hpx::lcos::local::detail {
             {
                 auto* front = queue.front();
                 auto ctx = front->ctx_;
+                auto const notify = front->timed_wait_ ?
+                    front->timed_wait_->notify(
+                        threads::thread_restart_state::abort) :
+                    notification::resume;
 
                 // remove item from queue before error handling
                 front->ctx_.reset();
-                front->was_reset_.store(true, std::memory_order_relaxed);
 
                 queue.pop_front();
+
+                if (notify != notification::resume)
+                    continue;
 
                 if (HPX_UNLIKELY(!ctx))
                 {
@@ -346,6 +364,10 @@ namespace hpx::lcos::local::detail {
         HPX_ASSERT_OWNS_LOCK(lock);
         queue.splice(queue_);
         queue_.swap(queue);
+        for (queue_entry* qe = queue_.front(); qe != nullptr; qe = qe->next)
+        {
+            qe->q_ = &queue_;
+        }
     }
 
     ///////////////////////////////////////////////////////////////////////////

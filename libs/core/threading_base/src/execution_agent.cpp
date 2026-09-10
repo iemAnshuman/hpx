@@ -14,6 +14,8 @@
 #include <hpx/modules/lock_registration.hpp>
 #include <hpx/modules/logging.hpp>
 #include <hpx/modules/tracing.hpp>
+#include <hpx/modules/type_support.hpp>
+#include <hpx/threading_base/detail/get_default_timer_service.hpp>
 #include <hpx/threading_base/execution_agent.hpp>
 #include <hpx/threading_base/scheduler_base.hpp>
 #include <hpx/threading_base/set_thread_state.hpp>
@@ -33,9 +35,15 @@
 #include <hpx/modules/likwid.hpp>
 #endif
 
+#if defined(HPX_WINDOWS)
+#include <winsock2.h>
+#endif
+#include <asio/steady_timer.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace {
@@ -118,6 +126,57 @@ namespace hpx::threads {
         do_yield(desc, threads::thread_schedule_state::suspended);
     }
 
+    threads::thread_restart_state execution_agent::suspend_until(
+        hpx::chrono::steady_time_point const& deadline,
+        std::shared_ptr<hpx::execution_base::agent_wait_state> const& state,
+        hpx::move_only_function<bool()>&& wait_cond, char const* desc)
+    {
+        using notification =
+            hpx::execution_base::agent_wait_state::notification;
+
+        if (wait_cond && wait_cond())
+        {
+            state->notify(thread_restart_state::signaled);
+        }
+
+        // Check interruption before committing to parking. Throwing after that
+        // transition could leave a notifier's scheduled resume unconsumed.
+        get_thread_id_data(self_.get_thread_id())->interruption_point();
+
+        asio::steady_timer timer(
+            detail::get_default_timer_service(), deadline.value());
+        // Withdraw the wait before the timer's destructor cancels its callback.
+        [[maybe_unused]] auto cancel = hpx::experimental::scope_exit(
+            [&]() { state->notify(thread_restart_state::abort); });
+        timer.async_wait(
+            [state, id = thread_id_ref_type(self_.get_thread_id())](
+                std::error_code const& ec) {
+                if (!ec &&
+                    state->notify(thread_restart_state::timeout) ==
+                        notification::resume)
+                {
+                    detail::set_thread_state(id.noref(),
+                        thread_schedule_state::pending,
+                        thread_restart_state::timeout, thread_priority::boost,
+                        thread_schedule_hint{}, true);
+                }
+            });
+
+        // A notification before this transition needs no scheduler wake-up.
+        // Afterwards, always park to consume the selected resume.
+        if (state->prepare_suspend())
+        {
+            do_yield(desc, thread_schedule_state::suspended, false);
+        }
+        if (state->reason() == thread_restart_state::abort)
+        {
+            HPX_THROW_EXCEPTION(hpx::error::yield_aborted, desc,
+                "thread({}) aborted (yield returned wait_abort)",
+                description());
+        }
+        return state->reason();
+    }
+
     threads::thread_restart_state execution_agent::sleep_for(
         hpx::chrono::steady_duration const& sleep_duration,
         hpx::move_only_function<bool()>&& wait_cond, char const* desc)
@@ -191,7 +250,8 @@ namespace hpx::threads {
     }
 
     hpx::threads::thread_restart_state execution_agent::do_yield(
-        char const* desc, threads::thread_schedule_state state)
+        char const* desc, threads::thread_schedule_state state,
+        bool const check_initial_interruption)
     {
         thread_id_type id = self_.get_outer_thread_id();
         if (HPX_UNLIKELY(!id))
@@ -212,7 +272,8 @@ namespace hpx::threads {
                 "HPX-thread?)");
         }
 
-        thrd_data->interruption_point();
+        if (check_initial_interruption)
+            thrd_data->interruption_point();
 
         // keep the thread alive if it's not a background thread (background
         // threads are being kept alive by the scheduler)

@@ -14,6 +14,7 @@
 #include <hpx/modules/timing.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 
 #include <hpx/config/warnings_prefix.hpp>
@@ -48,6 +49,11 @@ namespace hpx::threads {
         void yield(char const* desc) override;
         bool yield_k(std::size_t k, char const* desc) override;
         void suspend(char const* desc) override;
+        threads::thread_restart_state suspend_until(
+            hpx::chrono::steady_time_point const& deadline,
+            std::shared_ptr<hpx::execution_base::agent_wait_state> const& state,
+            hpx::move_only_function<bool()>&& wait_cond,
+            char const* desc) override;
         void resume(
             hpx::threads::thread_priority priority, char const* desc) override;
         void abort(char const* desc) override;
@@ -63,8 +69,9 @@ namespace hpx::threads {
     private:
         coroutines::detail::coroutine_stackful_self self_;
 
-        hpx::threads::thread_restart_state do_yield(
-            char const* desc, threads::thread_schedule_state state);
+        hpx::threads::thread_restart_state do_yield(char const* desc,
+            threads::thread_schedule_state state,
+            bool check_initial_interruption = true);
 
         void do_resume(hpx::threads::thread_priority priority, char const* desc,
             hpx::threads::thread_restart_state statex) const;

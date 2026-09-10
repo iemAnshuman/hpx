@@ -22,6 +22,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -78,6 +79,11 @@ namespace hpx::execution_base {
             void yield(char const* desc) override;
             bool yield_k(std::size_t k, char const* desc) override;
             void suspend(char const* desc) override;
+            threads::thread_restart_state suspend_until(
+                hpx::chrono::steady_time_point const& deadline,
+                std::shared_ptr<agent_wait_state> const& state,
+                hpx::move_only_function<bool()>&& wait_cond,
+                char const* desc) override;
             void resume(hpx::threads::thread_priority priority,
                 char const* desc) override;
             void abort(char const* desc) override;
@@ -140,6 +146,55 @@ namespace hpx::execution_base {
                 HPX_THROW_EXCEPTION(hpx::error::yield_aborted, "suspend",
                     "std::thread({}) aborted (yield returned wait_abort)", id_);
             }
+        }
+
+        threads::thread_restart_state default_agent::suspend_until(
+            hpx::chrono::steady_time_point const& deadline,
+            std::shared_ptr<agent_wait_state> const& state,
+            hpx::move_only_function<bool()>&& wait_cond, char const* desc)
+        {
+            if (wait_cond && wait_cond())
+            {
+                state->notify(threads::thread_restart_state::signaled);
+            }
+
+            std::unique_lock<std::mutex> l(mtx_);
+            HPX_ASSERT(running_);
+            if (!state->prepare_suspend())
+            {
+                if (state->reason() == threads::thread_restart_state::abort)
+                {
+                    HPX_THROW_EXCEPTION(hpx::error::yield_aborted, desc,
+                        "std::thread({}) aborted (yield returned wait_abort)",
+                        id_);
+                }
+                return state->reason();
+            }
+            running_ = false;
+            resume_cv_.notify_all();
+
+            if (!suspend_cv_.wait_until(
+                    l, deadline.value(), [this]() { return running_; }))
+            {
+                if (state->notify(threads::thread_restart_state::timeout) !=
+                    agent_wait_state::notification::stale)
+                {
+                    running_ = true;
+                }
+                else
+                {
+                    // A notifier owns the wake-up. Consume its resume even
+                    // if it has not reached this agent before the deadline.
+                    suspend_cv_.wait(l, [this]() { return running_; });
+                }
+            }
+
+            if (aborted_)
+            {
+                HPX_THROW_EXCEPTION(hpx::error::yield_aborted, desc,
+                    "std::thread({}) aborted (yield returned wait_abort)", id_);
+            }
+            return state->reason();
         }
 
         void default_agent::resume(hpx::threads::thread_priority, char const*)

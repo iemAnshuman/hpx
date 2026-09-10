@@ -5,8 +5,10 @@
 //  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 
 #include <hpx/init.hpp>
+#include <hpx/modules/async_local.hpp>
 #include <hpx/modules/coroutines.hpp>
 #include <hpx/modules/execution_base.hpp>
+#include <hpx/modules/futures.hpp>
 #include <hpx/modules/synchronization.hpp>
 #include <hpx/modules/testing.hpp>
 #include <hpx/modules/threading_base.hpp>
@@ -14,7 +16,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
+#include <thread>
+#include <utility>
 
 // Predicate flips to true from another thread shortly before the deadline,
 // but via a plain shared flag (no notify()/resume()) - so the waiting
@@ -159,8 +164,91 @@ void test_sleep_with_predicate_hpx_thread_timeout()
     HPX_TEST(now + sleep_duration <= std::chrono::steady_clock::now());
 }
 
+void test_arbitrated_timed_wait()
+{
+    using hpx::execution_base::agent_wait_state;
+    using hpx::threads::thread_restart_state;
+    using notification = agent_wait_state::notification;
+
+    auto const agent = hpx::execution_base::this_thread::agent();
+    auto const expired = std::chrono::steady_clock::now();
+
+    auto predicate_state = std::make_shared<agent_wait_state>();
+    HPX_TEST(agent.ref().suspend_until(
+                 expired, predicate_state, []() { return true; },
+                 "predicate wins") == thread_restart_state::signaled);
+    HPX_TEST(predicate_state->notify(thread_restart_state::signaled) ==
+        notification::stale);
+
+    auto timeout_state = std::make_shared<agent_wait_state>();
+    HPX_TEST(agent.ref().suspend_until(
+                 expired, timeout_state, []() { return false; },
+                 "timeout wins") == thread_restart_state::timeout);
+    HPX_TEST(timeout_state->notify(thread_restart_state::signaled) ==
+        notification::stale);
+
+    // Before parking, notification must not schedule a resume that could
+    // arrive in a later wait. It must also release a mutex needed by the
+    // predicate without waiting for the native agent to suspend.
+    auto notified_state = std::make_shared<agent_wait_state>();
+    std::mutex predicate_mutex;
+    std::atomic<bool> notified{false};
+    std::thread notifier([&]() {
+        std::lock_guard<std::mutex> l(predicate_mutex);
+        auto const result =
+            notified_state->notify(thread_restart_state::signaled);
+        notified.store(true);
+        HPX_TEST(result == notification::claimed);
+        if (result == notification::resume)
+            agent.resume();
+    });
+    while (!notified.load())
+        std::this_thread::yield();
+    HPX_TEST(agent.ref().suspend_until(
+                 expired, notified_state,
+                 [&]() {
+                     std::lock_guard<std::mutex> l(predicate_mutex);
+                     return true;
+                 },
+                 "notification wins") == thread_restart_state::signaled);
+    notifier.join();
+}
+
+void test_timed_wait_followed_by_future()
+{
+    for (int i = 0; i != 10000; ++i)
+    {
+        hpx::promise<void> first;
+        auto ready = first.get_future();
+        hpx::post([p = std::move(first)]() mutable { p.set_value(); });
+        ready.wait_for(std::chrono::milliseconds(1));
+        ready.get();
+
+        hpx::promise<void> second;
+        auto next = second.get_future();
+        hpx::post([p = std::move(second)]() mutable {
+            for (int j = 0; j != 10; ++j)
+                hpx::this_thread::yield();
+            p.set_value();
+        });
+        try
+        {
+            next.get();
+        }
+        catch (hpx::exception const& e)
+        {
+            HPX_TEST_MSG(false, e.what());
+            return;
+        }
+    }
+}
+
 int hpx_main()
 {
+    test_arbitrated_timed_wait();
+    std::thread native_waiter(test_arbitrated_timed_wait);
+    native_waiter.join();
+    test_timed_wait_followed_by_future();
     test_sleep_predicate_true_at_deadline();
     test_wait_for_notify_before_timeout();
     test_sleep_with_predicate_hpx_thread_immediate();

@@ -54,6 +54,14 @@ struct dummy_agent : hpx::execution_base::agent_base
         return true;
     }
     void suspend(char const*) override {}
+    hpx::threads::thread_restart_state suspend_until(
+        hpx::chrono::steady_time_point const&,
+        std::shared_ptr<hpx::execution_base::agent_wait_state> const& state,
+        hpx::move_only_function<bool()>&&, char const*) override
+    {
+        state->notify(hpx::threads::thread_restart_state::timeout);
+        return state->reason();
+    }
     void resume(hpx::threads::thread_priority, char const*) override {}
     void abort(char const*) override {}
 
