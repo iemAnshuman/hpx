@@ -46,7 +46,7 @@ if name == "sbatch":
     time.sleep(float(os.environ.get("SUBMIT_DELAY", "0")))
     if os.environ.get("JOB_ID", "12345"):
         print(os.environ.get("JOB_ID", "12345"), flush=True)
-    Path(os.environ["READY"]).touch()
+    Path(os.environ["READY"]).write_text(str(time.monotonic()))
     time.sleep(float(os.environ.get("JOB_DELAY", "0")))
     sys.exit(int(os.environ.get("JOB_EXIT", "0")))
 if name == "scancel":
@@ -54,7 +54,12 @@ if name == "scancel":
     sys.exit(int(os.environ.get("CANCEL_EXIT", "0")))
 if name == "squeue":
     time.sleep(float(os.environ.get("QUEUE_DELAY", "0")))
-    if os.environ.get("QUEUE_JOBS"):
+    if any(arg.startswith("--jobs=") for arg in sys.argv):
+        submitted = float(Path(os.environ["READY"]).read_text())
+        pending = float(os.environ.get("PENDING_DELAY", "0"))
+        print("PENDING" if time.monotonic() - submitted < pending else
+              os.environ.get("JOB_STATE", "RUNNING"))
+    elif os.environ.get("QUEUE_JOBS"):
         print("12345")
     sys.exit(int(os.environ.get("QUEUE_EXIT", "0")))
 '''
@@ -73,7 +78,7 @@ class SlurmLifecycle(unittest.TestCase):
         self.ready = self.path / "ready"
         self.env = dict(os.environ, PATH=str(self.path) + ":" + os.environ["PATH"],
                         CALL_LOG=str(self.log), READY=str(self.ready),
-                        TMPDIR=str(self.path))
+                        TMPDIR=str(self.path), HPX_SLURM_POLL_INTERVAL="1")
 
     def start(self, command='hpx_slurm_run 10s --job-name=lane batch.sh', **env):
         self.env.update(env)
@@ -215,11 +220,79 @@ class SlurmLifecycle(unittest.TestCase):
                 self.assertEqual(code, 1)
         self.assertEqual(self.calls("scancel"), [])
 
-    def test_queue_and_runtime_timeout(self):
+    def test_runtime_timeout(self):
         code, _, _ = self.finish(self.start(
             'hpx_slurm_run 1s batch.sh', JOB_DELAY="30"))
         self.assertEqual(code, 124)
         self.assertEqual(self.calls("scancel"), [["12345"]])
+
+    def test_queue_wait_does_not_consume_runtime_budget(self):
+        code, _, err = self.finish(self.start(
+            'hpx_slurm_run 4s batch.sh', HPX_SLURM_QUEUE_TIMEOUT="5s",
+            PENDING_DELAY="3", JOB_DELAY="6"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls("scancel"), [])
+
+    def test_pending_job_has_a_separate_bound(self):
+        code, _, err = self.finish(self.start(
+            'hpx_slurm_run 10s batch.sh', HPX_SLURM_QUEUE_TIMEOUT="2s",
+            PENDING_DELAY="30", JOB_DELAY="30"))
+        self.assertEqual(code, 124, err)
+        self.assertIn("queue wait timed out", err)
+        self.assertEqual(self.calls("scancel"), [["12345"]])
+
+    def test_start_between_last_poll_and_queue_deadline(self):
+        code, _, err = self.finish(self.start(
+            'hpx_slurm_run 5s batch.sh', HPX_SLURM_QUEUE_TIMEOUT="4s",
+            HPX_SLURM_POLL_INTERVAL="30", PENDING_DELAY="2", JOB_DELAY="6"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls("scancel"), [])
+
+    def test_completion_during_query_preserves_batch_failure(self):
+        code, _, err = self.finish(self.start(
+            JOB_DELAY="2", JOB_EXIT="42", QUEUE_DELAY="3", QUEUE_EXIT="6"))
+        self.assertEqual(code, 42, err)
+
+    def test_submission_without_id_is_bounded(self):
+        code, _, err = self.finish(self.start(
+            'hpx_slurm_run 1s batch.sh', HPX_SLURM_QUEUE_TIMEOUT="1s",
+            SUBMIT_DELAY="30"))
+        self.assertEqual(code, 124, err)
+        self.assertEqual(self.calls("scancel"), [])
+
+    def test_hung_owned_job_query_is_bounded(self):
+        code, _, err = self.finish(self.start(
+            HPX_SLURM_QUEUE_TIMEOUT="2s", JOB_DELAY="30", QUEUE_DELAY="30"))
+        self.assertEqual(code, 124, err)
+        self.assertEqual(self.calls("scancel"), [["12345"]])
+
+    def test_owned_job_query_failure_cancels_only_owned_job(self):
+        code, _, err = self.finish(self.start(JOB_DELAY="30", QUEUE_EXIT="6"))
+        self.assertEqual(code, 6, err)
+        self.assertEqual(self.calls("scancel"), [["12345"]])
+
+    def test_completed_job_wait_preserves_exit_code(self):
+        code, _, err = self.finish(self.start(
+            JOB_DELAY="2", JOB_STATE="", JOB_EXIT="42"))
+        self.assertEqual(code, 42, err)
+
+    def test_cluster_query_uses_submission_cluster(self):
+        code, _, err = self.finish(self.start(
+            JOB_ID="12345;rostam", JOB_DELAY="2"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.calls("squeue"), [[
+            "--clusters=rostam", "--jobs=12345", "--noheader", "--format=%T"]])
+
+    def test_invalid_queue_bound_or_poll_interval_rejects_submission(self):
+        for env in ({"HPX_SLURM_QUEUE_TIMEOUT": "0s"},
+                    {"HPX_SLURM_QUEUE_TIMEOUT": "invalid"},
+                    {"HPX_SLURM_POLL_INTERVAL": "0"}):
+            with self.subTest(env=env):
+                self.env.pop("HPX_SLURM_QUEUE_TIMEOUT", None)
+                self.env["HPX_SLURM_POLL_INTERVAL"] = "1"
+                code, _, _ = self.finish(self.start(**env))
+                self.assertEqual(code, 2)
+        self.assertEqual(self.calls("sbatch"), [])
 
     def test_timeout_kills_unresponsive_sbatch(self):
         code, _, _ = self.finish(self.start(
