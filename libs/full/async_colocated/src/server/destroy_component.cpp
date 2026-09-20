@@ -41,7 +41,7 @@ namespace hpx::components::server {
 
             // The object is local, we can destroy it locally...
             if (auto const r = agas::was_object_migrated(
-                    gid, []() { return pinned_ptr(); });
+                    gid, addr.address_, []() { return pinned_ptr(); });
                 !r.first)
             {
                 if (naming::refers_to_virtual_memory(gid))
