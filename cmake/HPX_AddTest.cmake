@@ -105,6 +105,7 @@ function(add_hpx_test category name)
   foreach(arg ${${name}_UNPARSED_ARGUMENTS})
     set(args ${args} "${arg}")
   endforeach()
+  list(APPEND args ${${name}_ARGS})
   set(args "-v" "--" ${args})
   if(${HPX_WITH_TESTS_DEBUG_LOG})
     set(args ${args}
