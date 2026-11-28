@@ -724,10 +724,12 @@ default, which stands for the defaults compiled into |hpx|.
        for load balancing, from ``1`` up to ``1024``. The default is ``8``.
    * * ``hpx.task_size_chunk_size.copy_bytes_per_ns``
      * The value of this property defines the number of bytes a core copies in
-       a nanosecond, from ``1`` up to ``4096``. The algorithms that copy or
-       move trivially copyable elements without calling a function derive the
-       task size of a chunk from it. The default is ``16``, about the rate for
-       data that is not in the caches.
+       a nanosecond, from ``1`` up to ``4096``, each byte read and written. The
+       algorithms that copy, move, fill, swap or reverse builtin elements, and
+       those that call a builtin arithmetic function object or comparison
+       (``std::plus``, ``std::less`` and the like) on them, derive the run time of an iteration from it, from
+       the bytes the iteration reads and writes (see :ref:`task_sizes`). The
+       default is ``16``, about the rate for data that is not in the caches.
    * * ``hpx.task_size_chunk_size.<executor>.min_chunk_time_us``
      * The value of this property defines the minimal run time of a chunk, in
        microseconds, for the loops of one executor, in place of
@@ -817,6 +819,9 @@ The ``hpx.parcel`` configuration section
     async_serialization = ${HPX_PARCEL_ASYNC_SERIALIZATION:1}
     fast_path = ${HPX_PARCEL_FAST_PATH:0}
     message_handlers = ${HPX_PARCEL_MESSAGE_HANDLERS:0}
+    device_conduit = ${HPX_PARCEL_DEVICE_CONDUIT:auto}
+    conduit_host_chunks = ${HPX_PARCEL_CONDUIT_HOST_CHUNKS:1}
+    conduit_host_threshold = ${HPX_PARCEL_CONDUIT_HOST_THRESHOLD:1048576}
 
 .. _ini_hpx_parcel:
 
@@ -884,18 +889,57 @@ The ``hpx.parcel`` configuration section
      * This property defines whether this :term:`locality` is allowed to spawn a
        new thread for serialization (this is both for encoding and decoding
        parcels). The default is ``1``.
+   * * ``hpx.parcel.device_conduit``
+     * This property selects the device conduit that moves the zero-copy chunks
+       of device memory of :term:`parcel`\ s between localities below the
+       parcelports (for instance ``ucx`` or ``nccl``, if compiled in), or
+       ``none``. A :term:`locality` uses one device conduit at a time, for all
+       its parcelports and all destinations: several conduits compiled in
+       are alternatives, of which this property selects one at startup. Each
+       :term:`locality` publishes the name of its conduit with
+       its endpoints; device data goes through the conduit only to localities
+       that use the same one, otherwise through the parcelport. The default,
+       ``auto``, selects ``ucx`` where |hpx| is built with the UCX device
+       conduit (``HPX_WITH_DEVICE_CONDUIT_UCX``) and does not use MPI in the
+       process (as the MPI parcelport does; a process can't use two UCX
+       libraries, and the MPI parcelport moves device memory itself), and
+       ``none`` otherwise. If the conduit selected this way can't start, the
+       :term:`locality` continues without one.
+   * * ``hpx.parcel.conduit_host_chunks``
+     * This property defines whether the device conduit also moves zero-copy
+       chunks of host memory of at least ``hpx.parcel.conduit_host_threshold``
+       bytes, for objects that accept their data after their de-serialization
+       (arrays, for instance ``std::vector`` and ``serialize_buffer`` of
+       bitwise serializable types), if the conduit moves host memory (``ucx``
+       does). It is set per parcelport with
+       ``hpx.parcel.<parcelport>.conduit_host_chunks`` (defaulting to this
+       value) and published with the parcelport's endpoint: a sender uses the
+       conduit for host chunks only to destinations whose endpoint for the same
+       parcelport says they receive them that way, and once the conduit has
+       found that it reaches the destination (until then, and if it doesn't,
+       the parcelport moves them). Useful for the TCP parcelport
+       on networks the conduit can use directly (RDMA). The default is ``1``:
+       with the default device conduit (``auto``, ``ucx`` unless |hpx| uses
+       MPI), large host chunks go through UCX. Conduits that move device
+       memory only (``nccl``) ignore it.
+   * * ``hpx.parcel.conduit_host_threshold``
+     * This property defines the smallest chunk of host memory (in bytes) the
+       device conduit moves if ``hpx.parcel.conduit_host_chunks`` is set; the
+       same for all parcelports. The default is ``1048576``.
    * * ``hpx.parcel.fast_path``
      * This property defines whether a parcelport that sends parcels
        immediately (MPI, LCI or LCW with ``sendimm=1`` in its section)
        encodes a :term:`parcel` in one pass, without the preprocessing pass,
        if the destination can take the parcel now, no device conduit
-       (``hpx.parcel.device_conduit``) reaches the destination, and the
+       (``hpx.parcel.device_conduit``) is used for the destination, and the
        parcel has no serialization filter.
        A parcel with a value that needs the preprocessing pass (a managed
        ``id_type``, a future or ``task_group`` that is not ready) stops that
        encode and takes the usual path; the work of the stopped encode is
        lost. A save function of a user type that relies on the
-       preprocessing pass must call ``ar.defer_to_preprocessing()`` first.
+       preprocessing pass must call ``ar.defer_to_preprocessing()`` before
+       any side effect and, if it returns ``true``, return without saving
+       anything.
        Device memory without a prepared host copy is copied synchronously.
        The default is ``0``.
    * * ``hpx.parcel.message_handlers``

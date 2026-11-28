@@ -375,6 +375,7 @@ namespace hpx {
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -437,8 +438,11 @@ namespace hpx::parallel {
                             return detail::sequential_reduce<ExPolicy>(
                                 ++part_begin, --part_size, HPX_MOVE(val), r);
                         },
-                        task_size_of_iteration<T const&,
-                            std::iter_reference_t<FwdIterB>>(r, first));
+                        // 1.5 times the run time of the bytes of a builtin
+                        // operation on builtin elements (measured)
+                        task_size_of_iteration_with<void, std::ratio<3, 2>,
+                            T const&, std::iter_reference_t<FwdIterB>>(
+                            r, first));
 
                     return util::partitioner<ExPolicy, T>::call(
                         HPX_FORWARD(ExPolicy, policy), first,
@@ -470,8 +474,11 @@ namespace hpx::parallel {
                                 std::next(part_begin, 2), part_size - 2,
                                 HPX_MOVE(val), r);
                         },
-                        task_size_of_iteration<T const&,
-                            std::iter_reference_t<FwdIterB>>(r, first));
+                        // 1.5 times the run time of the bytes of a builtin
+                        // operation on builtin elements (measured)
+                        task_size_of_iteration_with<void, std::ratio<3, 2>,
+                            T const&, std::iter_reference_t<FwdIterB>>(
+                            r, first));
 
                     return util::partitioner<ExPolicy, T, part_result>::call(
                         HPX_FORWARD(ExPolicy, policy), first,

@@ -120,12 +120,15 @@ if(HPX_WITH_DEVICE_CONDUIT_UCX)
     EXECUTABLE device_conduit
     PSEUDO_DEPS_NAME device_conduit ${device_conduit_PARAMETERS}
     RUN_SERIAL
+    # the test counts the chunks of device memory: host chunks stay with the
+    # parcelport
     ARGS --hpx:ini=hpx.parcel.device_conduit=ucx
+         --hpx:ini=hpx.parcel.conduit_host_chunks=0
   )
 endif()
 
 # run fast_path_fallback with the fast path on (only parcelports that send
-# immediately use it)
+# immediately use it, and only without a device conduit)
 add_hpx_unit_test(
   "modules.parcelset" fast_path_fallback_enabled
   EXECUTABLE fast_path_fallback
@@ -133,7 +136,7 @@ add_hpx_unit_test(
   PARCELPORTS mpi lci lcw
   RUN_SERIAL
   ARGS --hpx:ini=hpx.parcel.fast_path!=1 --hpx:ini=hpx.parcel.mpi.sendimm!=1
-       --fast-path
+       --hpx:ini=hpx.parcel.device_conduit!=none --fast-path
 )
 
 # run device_conduit with the fast path on: its parcels must still move their

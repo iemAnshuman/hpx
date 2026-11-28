@@ -367,7 +367,8 @@ namespace hpx::parcelset {
             // of the 'this' pointer.
             // the same flags as for the real serialization (encode_parcels)
             std::uint32_t const flags = archive_flags_ |
-                detail::device_conduit_flags(p.destination_locality_id());
+                detail::device_conduit_flags(
+                    *this, p.destination_locality_id());
             detail::parcel_await_apply(
                 HPX_MOVE(p), HPX_MOVE(f), flags,
                 [this, dest](parcel&& p, write_handler_type&& f) {
@@ -431,7 +432,7 @@ namespace hpx::parcelset {
             // the same flags as for the real serialization (encode_parcels)
             std::uint32_t const flags = archive_flags_ |
                 detail::device_conduit_flags(
-                    parcels[0].destination_locality_id());
+                    *this, parcels[0].destination_locality_id());
             detail::parcels_await_apply(
                 HPX_MOVE(parcels), HPX_MOVE(handlers), flags,
                 [this, dest](std::vector<parcel>&& parcels,
@@ -1074,7 +1075,8 @@ namespace hpx::parcelset {
             // the one-pass encode neither sets the conduit flags nor attaches
             // its sender, and a stopped encode would leave conduit transfers
             // behind
-            if (detail::device_conduit_flags(p.destination_locality_id()) != 0)
+            if (detail::device_conduit_flags(
+                    *this, p.destination_locality_id()) != 0)
             {
                 return false;
             }

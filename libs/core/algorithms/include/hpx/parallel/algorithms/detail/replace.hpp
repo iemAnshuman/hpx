@@ -20,6 +20,7 @@
 #include <hpx/parallel/util/zip_iterator.hpp>
 
 #include <algorithm>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 
@@ -51,8 +52,11 @@ namespace hpx::parallel::detail {
 
                 // an element has the size of its comparison with the old value
                 auto const size =
-                    task_size_of_iteration<task_size_argument_t<InIter, Proj>,
-                        T1 const&>(hpx::parallel::detail::equal_to{}, first);
+                    // 1.5 times the run time of the bytes of a builtin
+                    // operation on builtin elements (measured)
+                    task_size_of_iteration_with<void, std::ratio<3, 2>,
+                        task_size_argument_t<InIter, Proj>, T1 const&>(
+                        hpx::parallel::detail::equal_to{}, first);
 
                 return for_each_n<InIter>().call(HPX_FORWARD(ExPolicy, policy),
                     first, hpx::parallel::detail::distance(first, last),
@@ -171,8 +175,11 @@ namespace hpx::parallel::detail {
 
                 // an element has the size of its comparison with the old value
                 auto const size =
-                    task_size_of_iteration<task_size_argument_t<InIter, Proj>,
-                        T const&>(hpx::parallel::detail::equal_to{}, first);
+                    // 1.5 times the run time of the bytes of a builtin
+                    // operation on builtin elements (measured)
+                    task_size_of_iteration_with<void, std::ratio<3, 2>,
+                        task_size_argument_t<InIter, Proj>, T const&>(
+                        hpx::parallel::detail::equal_to{}, first);
 
                 return util::detail::get_in_out_result(
                     for_each_n<zip_iterator>().call(
