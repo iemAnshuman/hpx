@@ -224,6 +224,7 @@ namespace hpx {
 #include <cstddef>
 #include <functional>
 #include <iterator>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 
@@ -349,7 +350,9 @@ namespace hpx::parallel {
                     HPX_FORWARD(ExPolicy, policy), first,
                     detail::distance(first, last),
                     hpx::threads::detail::with_task_size(HPX_MOVE(f1),
-                        task_size_of_iteration<
+                        // 1.5 times the run time of the bytes of a builtin
+                        // operation on builtin elements (measured)
+                        task_size_of_iteration_with<void, std::ratio<3, 2>,
                             task_size_argument_t<IterB, Proj>>(f1.op_, first)),
                     hpx::unwrapping([](auto&& results, auto&&...) {
                         return util::accumulate_n(hpx::util::begin(results),
@@ -419,7 +422,9 @@ namespace hpx::parallel {
                     HPX_FORWARD(ExPolicy, policy), first,
                     detail::distance(first, last),
                     hpx::threads::detail::with_task_size(HPX_MOVE(f1),
-                        task_size_of_iteration<
+                        // 1.5 times the run time of the bytes of a builtin
+                        // operation on builtin elements (measured)
+                        task_size_of_iteration_with<void, std::ratio<3, 2>,
                             task_size_argument_t<IterB, Proj>>(f1.op_, first)),
                     hpx::unwrapping([](auto&& results, auto&&...) {
                         return util::accumulate_n(hpx::util::begin(results),

@@ -312,6 +312,7 @@ namespace hpx {
 #include <exception>
 #include <iterator>
 #include <list>
+#include <ratio>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -898,11 +899,19 @@ namespace hpx::parallel {
                 }
             };
 
-            // an iteration has the size of the comparison of two elements
-            auto f1 = hpx::threads::detail::with_task_size(
-                HPX_MOVE(merge_chunk),
-                task_size_of_iteration<task_size_argument_t<Iter1, Proj1>,
-                    task_size_argument_t<Iter2, Proj2>>(comp, first1, first2));
+            // an iteration (an output element) has the size of the
+            // comparison of two elements; a builtin comparison on builtin
+            // elements the run time of the element it reads (from one of the
+            // inputs) and of the one it writes
+            auto f1 =
+                hpx::threads::detail::with_task_size(HPX_MOVE(merge_chunk),
+                    // a builtin comparison on builtin elements 6 times the
+                    // run time of the element read and the one written: the
+                    // comparison decides which input to read next, a branch
+                    // that mispredicts on unordered data
+                    task_size_of_iteration_with<Iter3, std::ratio<6>,
+                        task_size_argument_t<Iter1, Proj1>,
+                        task_size_argument_t<Iter2, Proj2>>(comp, first1));
 
             auto f2 = [end1, end2, len1, len2, dest](auto&&) {
                 return result_type{end1, end2, std::next(dest, len1 + len2)};
