@@ -1015,6 +1015,7 @@ namespace hpx {
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 
@@ -1075,8 +1076,11 @@ namespace hpx::parallel {
                 // an iteration has the size of the comparison of an element
                 // with the value
                 auto const size =
-                    task_size_of_iteration<task_size_argument_t<Iter, Proj>,
-                        T const&>(hpx::parallel::detail::equal_to{}, first);
+                    // 1.5 times the run time of the bytes of a builtin
+                    // operation on builtin elements (measured)
+                    task_size_of_iteration_with<void, std::ratio<3, 2>,
+                        task_size_argument_t<Iter, Proj>, T const&>(
+                        hpx::parallel::detail::equal_to{}, first);
                 auto f1 = [val, proj = HPX_FORWARD(Proj, proj), tok](Iter it,
                               std::size_t part_size,
                               std::size_t base_idx) mutable -> void {
@@ -1916,8 +1920,11 @@ namespace hpx::parallel::detail {
             // an iteration has the size of the comparison of an element with
             // the value
             auto const size =
-                task_size_of_iteration<task_size_argument_t<Iter, Proj>,
-                    T const&>(hpx::parallel::detail::equal_to{}, first);
+                // 1.5 times the run time of the bytes of a builtin
+                // operation on builtin elements (measured)
+                task_size_of_iteration_with<void, std::ratio<3, 2>,
+                    task_size_argument_t<Iter, Proj>, T const&>(
+                    hpx::parallel::detail::equal_to{}, first);
             auto f1 = [val, proj = HPX_FORWARD(Proj, proj), tok](Iter it,
                           std::size_t part_size,
                           std::size_t base_idx) mutable -> void {

@@ -236,6 +236,7 @@ namespace hpx {
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 
@@ -310,8 +311,11 @@ namespace hpx::parallel {
                 // an iteration has the size of the predicate called with an
                 // element
                 auto const size =
-                    task_size_of_iteration<task_size_argument_t<Iter, Proj>>(
-                        pred, first);
+                    // (a builtin comparison on builtin elements 3 times the
+                    // run time of the element it reads: the comparison
+                    // decides whether the element is moved)
+                    task_size_of_iteration_with<void, std::ratio<3>,
+                        task_size_argument_t<Iter, Proj>>(pred, first);
                 // Note: replacing the invoke() with HPX_INVOKE()
                 // below makes gcc generate errors
                 auto f1 = [pred = HPX_FORWARD(Pred, pred),

@@ -73,10 +73,12 @@ namespace hpx::parallel::detail {
     // elements (see traits::is_memory_bound_builtin_operation) costs about
     // what its bytes cost to read and write: the iteration gets the run time
     // of the elements of its and of the element it writes (see
-    // memory_task_size),
-    // times Weight (a std::ratio) for an iteration that calls f more or less
-    // than once per element.
-    HPX_CXX_CORE_EXPORT template <typename OutIter, typename Weight,
+    // memory_task_size), times Factor (a std::ratio): what an iteration of
+    // the algorithm takes over the time of those bytes on one core (measured
+    // with libs/core/algorithms/tests/performance/task_size_single_loop.cpp,
+    // --per_element), more than 1 for an algorithm whose work for an element
+    // depends on the result of the operation.
+    HPX_CXX_CORE_EXPORT template <typename OutIter, typename Factor,
         typename... Args, typename F, typename... Iters>
     [[nodiscard]] hpx::threads::task_size_and_time task_size_of_iteration_with(
         F const& f, Iters const&... its) noexcept
@@ -108,7 +110,7 @@ namespace hpx::parallel::detail {
                     (task_size_element_bytes<Iters> + ...) +
                     task_size_element_bytes<OutIter>;
                 return util::detail::memory_task_size(
-                    (bytes * Weight::num + Weight::den - 1) / Weight::den);
+                    (bytes * Factor::num + Factor::den - 1) / Factor::den);
             }
         }
         return {size, hpx::chrono::picoseconds(0)};

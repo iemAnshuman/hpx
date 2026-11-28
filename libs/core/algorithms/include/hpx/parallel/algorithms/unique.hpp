@@ -324,6 +324,7 @@ namespace hpx {
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <ratio>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -545,7 +546,11 @@ namespace hpx::parallel {
                 // an iteration of step 1 has the size of the comparison of two
                 // elements, step 3 only copies the selected elements
                 auto const size1 =
-                    task_size_of_iteration<task_size_argument_t<FwdIter1, Proj>,
+                    // (a builtin comparison on builtin elements 4 times the
+                    // run time of the element it reads: the comparison
+                    // decides whether the element is kept)
+                    task_size_of_iteration_with<void, std::ratio<4>,
+                        task_size_argument_t<FwdIter1, Proj>,
                         task_size_argument_t<FwdIter1, Proj>>(pred, first);
                 auto f1 = [pred = HPX_FORWARD(Pred, pred),
                               proj = HPX_FORWARD(Proj, proj)](

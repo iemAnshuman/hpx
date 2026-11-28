@@ -839,9 +839,12 @@ and ``hpx::ranges``) called with builtin elements, counting the elements an
 algorithm reads and, for ``transform``, ``adjacent_difference`` and
 ``merge``, the element it writes: adding two doubles into a third takes three
 quarters of a nanosecond, comparing two chars an eighth of the time of
-comparing two doubles. ``minmax_element`` compares 1.5 times per element and
-gets 1.5 times the bytes. Consecutive loops over the same data are then sized
-alike. Logical operations, ``std::divides`` and ``std::modulus`` stay nano.
+comparing two doubles. An algorithm whose work for an element costs more
+than its bytes multiplies them by a factor measured on one core: 1.5 for
+``count``, ``find``, ``replace`` and ``reduce``, 3 for ``remove``, 4 for
+``unique``, 6 for ``merge`` and 8 for ``minmax_element`` (whose comparisons
+decide what to do with an element, a branch that mispredicts on unordered
+data). Consecutive loops over the same data are then sized alike. Logical operations, ``std::divides`` and ``std::modulus`` stay nano.
 
 By default, ``task_size_chunk_size`` makes chunks of at least 2.5
 microseconds and gives each core 8 of them. Values given to its

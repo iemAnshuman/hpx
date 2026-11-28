@@ -312,6 +312,7 @@ namespace hpx {
 #include <exception>
 #include <iterator>
 #include <list>
+#include <ratio>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -904,7 +905,11 @@ namespace hpx::parallel {
             // inputs) and of the one it writes
             auto f1 =
                 hpx::threads::detail::with_task_size(HPX_MOVE(merge_chunk),
-                    task_size_of_iteration_writing<Iter3,
+                    // a builtin comparison on builtin elements 6 times the
+                    // run time of the element read and the one written: the
+                    // comparison decides which input to read next, a branch
+                    // that mispredicts on unordered data
+                    task_size_of_iteration_with<Iter3, std::ratio<6>,
                         task_size_argument_t<Iter1, Proj1>,
                         task_size_argument_t<Iter2, Proj2>>(comp, first1));
 
