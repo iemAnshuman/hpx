@@ -28,7 +28,9 @@ using task_size_checks::check_only_size;
 // the like) has the run time of the bytes the iteration reads instead (see
 // hpx::traits::is_memory_bound_builtin_operation): an int is 4 bytes, 0.125 ns
 // at the default 16 bytes per nanosecond (two ints 0.25 ns), so 10000
-// iterations make a small task.
+// iterations make a small task. minmax_element has 8 times the run time of
+// the int it reads (see hpx::parallel::detail::task_size_of_iteration_with),
+// 1 ns, so 10000 iterations make a medium task.
 //
 // The sizes are counted when the scheduler creates a thread (see
 // task_size_checks.hpp). The task policy makes the algorithms asynchronous,
@@ -51,7 +53,7 @@ void test_multi_call_sizes()
         task_size::small_);
     check_only_size(
         [&] { hpx::minmax_element(by_100, v.begin(), v.end()).get(); },
-        task_size::small_);
+        task_size::medium);
 
     // lexicographical_compare compares two elements in both orders
     check_only_size(
