@@ -27,10 +27,11 @@ using task_size_checks::check_only_size;
 // A builtin comparison on builtin elements (the default ones, std::less<> and
 // the like) has the run time of the bytes the iteration reads instead (see
 // hpx::traits::is_memory_bound_builtin_operation): an int is 4 bytes, 0.125 ns
-// at the default 16 bytes per nanosecond (two ints 0.25 ns), so 10000
-// iterations make a small task. minmax_element has 8 times the run time of
-// the int it reads (see hpx::parallel::detail::task_size_of_iteration_with),
-// 1 ns, so 10000 iterations make a medium task.
+// at the default 16 bytes per nanosecond (two ints 0.25 ns): a chunk of 100
+// iterations is nano and the worker's call of 100 chunks small.
+// minmax_element has 8 times the run time of the int it reads (see
+// hpx::parallel::detail::task_size_of_iteration_with), 1 ns: a chunk of 100
+// iterations is small and the worker's call of 100 chunks medium.
 //
 // The sizes are counted when the scheduler creates a thread (see
 // task_size_checks.hpp). The task policy makes the algorithms asynchronous,
